@@ -1,11 +1,11 @@
-# GlycopepECHO
+# DeepGlycan
 
 ## Dependency
 Our codes are tested under Linux system with at least one GPU. Example files are tested by A100s.
 
 We recommend using conda to manage all dependency. After install conda
 
-> conda install -n GlycopepECHO requirements.yaml
+> conda install -n DeepGlycan requirements.yaml
 
 > python setup.py build_ext --inplace
 
