@@ -1,5 +1,8 @@
 # DeepGlycan
 
+Trained model and data is uploaded to https://drive.google.com/drive/folders/13AOGA8FIBkSl8HzWyvJ2BIPxmPgT-kTN
+
+
 ## Dependency
 Our codes are tested under Linux system with at least one GPU. Example files are tested by A100s.
 
