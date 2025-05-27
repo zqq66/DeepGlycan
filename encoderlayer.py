@@ -35,7 +35,6 @@ class Relation(nn.Module):
         self.dn = DeepNorm(hidden_size, alpha, dropout_rate)
         self.predecessor_pad = nn.Parameter(torch.randn(self.d_relation))
 
-        #根据DeepNet，对初始化值做修正.
         nn.init.xavier_normal_(self.linear_v.weight, gain=beta)
         nn.init.xavier_normal_(self.output_layer.weight, gain=beta)
 
@@ -85,7 +84,6 @@ class FFNGLU(nn.Module):
         self.post_ffn = nn.Linear(4*hidden_size, hidden_size, bias=False)
         self.dn = DeepNorm(hidden_size, alpha, dropout_rate)
 
-        #根据DeepNet，对初始化值做修正.
         nn.init.xavier_normal_(self.pre_ffn_gate[0].weight, gain=beta)
         nn.init.xavier_normal_(self.pre_ffn.weight, gain=beta)
         nn.init.xavier_normal_(self.post_ffn.weight, gain=beta)

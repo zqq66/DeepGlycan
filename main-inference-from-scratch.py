@@ -16,12 +16,12 @@ from torch.cuda.amp import GradScaler
 
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from GlycopepECHO import Rnova
-from dataset import GenovaDataset
-from collator import GenovaCollator
+from DeepGlycan import DeepGlycan
+from dataset import DGDataset
+from collator import DGCollator
 from prefetcher import DataPrefetcher
 from inference import Inference_label_comp_o
-from sampler import RnovaBucketBatchSampler
+from sampler import DGBucketBatchSampler
 
 import hydra
 import json
@@ -44,6 +44,7 @@ mono_composition = {
     'neuAc': Composition('C11H19O9N') - Composition('H2O'),
     'neuGc': Composition('C11H19O10N') - Composition('H2O'),
     'fuc': Composition('C6H12O5') - Composition('H2O'),
+    # 'xyl': Composition('C5H10O5') - Composition('H2O'),
 }
 glycoCT_dict = {
     'Man': 0,
@@ -51,7 +52,7 @@ glycoCT_dict = {
     'NeuAc':2,
     'NeuGc': 3,
     'Fuc': 4,
-    'Xyl': 5
+    # 'Xyl': 5
 }
 aa_dict = {aa:i for i, aa in enumerate(mono_composition)}
 # aa_dict['<pad>'] = 0
@@ -75,40 +76,28 @@ def evaluate(inference, rank, cfg):
     mono_comp_dict_reversed = {v:k for k,v in mono_comp_dict.items()}
     with open(cfg.test_spec_header_path + cfg.out_put_file, mode='a', newline='') as file:
         writer = csv.writer(file)
-        header = ['Spec', 'isotope_shift','predict', 'label mass', 'predict mass','mass correct','mass difference', 'score', 'given pep mass', 'predict pep']
+        header = ['Spec', 'isotope_shift','predict', 'mass', 'predict mass','mass difference', 'score', 'Pep mass', 'predict pep']
         writer.writerow(header)
         for i, finish_pool in enumerate(inference,start=0):
             for pool in finish_pool.values():
-                # print('finish_pool', finish_pool)
-                # (inf_seq, label_seq, psm_idx) = pool
-                # inf_seq = inf_seq.cpu().tolist()[1:]
+               
                 inf_seq = pool.inference_seq
                 psm_idx = pool.psm_idx
                 mass_diff = pool.mass_diff
-                given_pep_mass = pool.rank
+                given_pep_mass = pool.pep_mass
                 isotope_shift = pool.isotope_shift
-                glycan_mass = pool.precursor_mass
+                precursor_mass = pool.precursor_mass
                 report_mass = pool.report_mass
-                score = torch.mean(torch.stack(pool.score_list))
+                pep = pool.pep
+                score = torch.mean( torch.stack(pool.score_list))
                 inf_seq_r = [mono_comp_dict_reversed[i] for i in inf_seq]
+                
+
+                row = [psm_idx,isotope_shift,''.join(inf_seq_r), precursor_mass, report_mass, mass_diff,score.item(),given_pep_mass,pep]
                 inf_seq_r = collections.Counter(inf_seq_r)
                 inf_seq_str = ''.join(f'{key}:{count} ' for key, count in inf_seq_r.items())
-                inf_seq = [str(i) for i in inf_seq]
-
-                row = [psm_idx,isotope_shift,inf_seq_str, glycan_mass, report_mass]
-                inf_seq.sort()
-                print(psm_idx)
-               
-                if mass_diff <= 0.05:
-                    row.append(1)
-                    correct_comp.append(1)
-                else:
-                    row.append(0)
-                    correct_comp.append(0)
-                print('inf_seq', inf_seq, sum(correct_comp)/len(correct_comp), mass_diff)
-                row.append(mass_diff)
-                row.append(score.item())
-                row.append(given_pep_mass)
+                print('inf_seq', inf_seq_str, mass_diff)
+                
                 writer.writerow(row)
 
                 # wandb.log({'accuracy_comp':sum(correct_comp)/len(correct_comp)})
@@ -123,17 +112,17 @@ def main(cfg:DictConfig):
     train_spec_header[['mass','pep mass given','Glycan mass']] = train_spec_header[['mass','pep mass given','Glycan mass']].astype(float)
     train_spec_header[['Node Number','MSGP Datablock Pointer','MSGP Datablock Length']] = train_spec_header[['Node Number','MSGP Datablock Pointer','MSGP Datablock Length']].astype(int)
     train_spec_header = train_spec_header[train_spec_header['Glycan mass']>0]
-    train_ds = GenovaDataset(cfg, aa_dict, spec_header=train_spec_header, dataset_dir_path=cfg.test_dataset_dir)
-    collator = GenovaCollator(cfg)
-    train_sampler = RnovaBucketBatchSampler(cfg, train_spec_header)
+    train_ds = DGDataset(cfg, aa_dict, spec_header=train_spec_header, dataset_dir_path=cfg.test_dataset_dir)
+    collator = DGCollator(cfg)
+    train_sampler = DGBucketBatchSampler(cfg, train_spec_header)
     train_dl = DataLoader(train_ds,batch_sampler=train_sampler,collate_fn=collator,num_workers=8,pin_memory=True)
     train_dl = DataPrefetcher(train_dl,local_rank)
 
     mass_list = [0]+list(detokenize_aa_dict.values())[:-1]
 
-    model = Rnova(cfg, torch.tensor(mass_list,device=local_rank), detokenize_aa_dict).to(local_rank)
+    model = DeepGlycan(cfg, torch.tensor(mass_list,device=local_rank), detokenize_aa_dict).to(local_rank)
     new_state_dict = {}
-    model_path='save/ethcd-all-20.pt9.pt'#ethcd-all-20.pt9.pt' #save/ethcd-glycan-only-rat-structured9.pt
+    model_path='save/ethcd-all-20.pt9.pt' # pglyco-scehcd-plant.pt'##save/ethcd-glycan-only-rat-structured9.pt
     state_dict = torch.load(model_path, weights_only=True,
             map_location='cuda:0')  # rl-best-pos9.pt
     for key in state_dict.keys():

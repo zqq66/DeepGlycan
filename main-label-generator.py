@@ -9,7 +9,7 @@ from torch.cuda.amp import GradScaler
 
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from GlycopepECHO import Rnova
+from DeepGlycan import Rnova
 from dataset import GenovaDataset
 from collator import  GenovaCollator
 from prefetcher import DataPrefetcher

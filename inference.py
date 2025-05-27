@@ -18,7 +18,10 @@ class Pep_Inference_Status:
     precursor_mass: float
     ms1_threshold: float
     ms2_threshold: float
-    rank: float
+    precursor_mass: float
+    pep_mass: float
+    glycan_mass:float
+    pep: str
     isotope_shift: int
     score_list: list = field(default_factory=list)
     current_mass: float = 0
@@ -31,12 +34,13 @@ class Pep_Finish_Status:
     psm_idx: str
     inference_seq: str
     #label_seq: str
-    rank: float
     isotope_shift: int
     score_list: list
     score: float
     mass_diff:float
     precursor_mass:float
+    pep:str
+    pep_mass:float
     report_mass:float
 
 class Pep_Inference_BeamPool(object):
@@ -74,7 +78,7 @@ class Inference_label_comp_o(object):
         self.range_tensor = self.range_tensor.repeat_interleave(2)
         self.range_tensor = torch.concat((torch.tensor([0]), self.range_tensor))
         self.beam_size=self.cfg.inference.beam_size
-
+        self.isotope_check = self.cfg.inference.isotope
         self.mass_cand = [int(i) for i in self.cfg.inference.mass_cand]
 
     def __iter__(self):
@@ -121,7 +125,7 @@ class Inference_label_comp_o(object):
 
     def exploration_initializing(self):
         
-        encoder_input, _, precursor_mass, pep_mass, psm_index, isotope_shift,charge_threshold, _, _  = next(self.inference_dl)
+        encoder_input, _, _,precursor_mass, pep_mass,glycan_mass, psm_index,pep, isotope_shift,charge_threshold, _, _  = next(self.inference_dl)
         
         with torch.inference_mode(): 
             if dist.is_initialized():
@@ -146,12 +150,14 @@ class Inference_label_comp_o(object):
             else: raise NotImplementedError
 
             pool.put(Pep_Inference_Status(psm_idx=psm_index[i],idx=i,
+                                          glycan_mass=glycan_mass[i],
                                           precursor_mass=precursor_mass[i],
                                           ms1_threshold = ms1_threshold,
                                           ms2_threshold = ms2_threshold,
                                           inference_seq=[5], mass_list=[0.],
                                           nmass=torch.tensor([0.]), current_mass=0,
-                                          rank=pep_mass[i],
+                                          pep=pep[i],
+                                          pep_mass=pep_mass[i],
                                           isotope_shift=isotope_shift[i]))
         tgt, glycan_mass, glycan_crossattn_mass, parent_mono_lists = self.decoder_inference_input_gen(pep_status_list, mem.device)
         with torch.inference_mode():
@@ -186,7 +192,6 @@ class Inference_label_comp_o(object):
                 next_aa = tgt[i, -1]
 
                 for aa_id in self.mass_cand:
-
                     current_status_new = deepcopy(current_status)
                     current_status_new.inference_seq.append(aa_id)
                     current_mass = self.detokenize_aa_dict[aa_id]
@@ -195,27 +200,42 @@ class Inference_label_comp_o(object):
                     current_status_new.current_mass += current_mass
                     current_status_new.total_score += next_aa[aa_id]
                     current_status_new.total_inference_len+=1
-                    current_status_new.score = current_status_new.total_score
+                    current_status_new.score = current_status_new.total_score/len(current_status.inference_seq)
                     current_status_new.score_list += [next_aa[aa_id]]
                     current_status_new.nmass=torch.cumsum(mass_list, dim=0)
                     #print('mass-diff', current_status_new.precursor_mass-current_status_new.current_mass)
-                    if (abs(current_status_new.precursor_mass-current_status_new.current_mass)< 1 or \
-                        current_status_new.precursor_mass<current_status_new.current_mass )or \
+                    if (abs(current_status_new.glycan_mass-current_status_new.current_mass)< 1 or \
+                        current_status_new.glycan_mass<current_status_new.current_mass )or \
                         len(current_status_new.inference_seq)>=self.cfg.data.peptide_max_len:
                         # print('mass-diff', current_status_new.precursor_mass-current_status_new.current_mass)
-                        mass_diff = abs(current_status_new.precursor_mass-current_status_new.current_mass)
-                        # print('tgt', tgt,current_status_new.psm_idx, current_status_new.inference_seq, current_status_new.score, current_status_new.current_mass, current_status_new.precursor_mass)
+                        mass_diff = abs(current_status_new.glycan_mass-current_status_new.current_mass)
+                        # print('tgt',current_status_new.psm_idx, current_status_new.inference_seq, current_status_new.score, current_status_new.current_mass, current_status_new.glycan_mass)
                         if current_status_new.idx in pep_finish_pool:
-                            if pep_finish_pool[current_status_new.idx].score<current_status_new.score and mass_diff<pep_finish_pool[current_status_new.idx].mass_diff:
-                                pep_finish_pool[current_status_new.idx] = Pep_Finish_Status(psm_idx=deepcopy(current_status_new.psm_idx),
+                            if not self.isotope_check:
+                                if mass_diff<pep_finish_pool[current_status_new.idx].mass_diff: #
+                                    pep_finish_pool[current_status_new.idx] = Pep_Finish_Status(psm_idx=deepcopy(current_status_new.psm_idx),
                                                                                             inference_seq=deepcopy(current_status_new.inference_seq[1:]),
                                                                                             precursor_mass = current_status_new.precursor_mass,
                                                                                             report_mass = current_status_new.current_mass,
+                                                                                            pep=current_status_new.pep,
+                                                                                            pep_mass=current_status_new.pep_mass,
                                                                                             #label_seq=deepcopy(current_status_new.label_seq),
                                                                                             score=current_status_new.score,
                                                                                             score_list=deepcopy(current_status_new.score_list),
                                                                                             mass_diff=mass_diff,
-                                                                                            rank=current_status_new.rank,
+                                                                                            isotope_shift=current_status_new.isotope_shift)
+                            else:
+                                if mass_diff<pep_finish_pool[current_status_new.idx].mass_diff and pep_finish_pool[current_status_new.idx].score<current_status_new.score:
+                                    pep_finish_pool[current_status_new.idx] = Pep_Finish_Status(psm_idx=deepcopy(current_status_new.psm_idx),
+                                                                                            inference_seq=deepcopy(current_status_new.inference_seq[1:]),
+                                                                                            precursor_mass = current_status_new.precursor_mass,
+                                                                                            report_mass = current_status_new.current_mass,
+                                                                                            pep=current_status_new.pep,
+                                                                                            pep_mass=current_status_new.pep_mass,
+                                                                                            #label_seq=deepcopy(current_status_new.label_seq),
+                                                                                            score=current_status_new.score,
+                                                                                            score_list=deepcopy(current_status_new.score_list),
+                                                                                            mass_diff=mass_diff,
                                                                                             isotope_shift=current_status_new.isotope_shift)
                         else:
 
@@ -225,9 +245,10 @@ class Inference_label_comp_o(object):
                                                                                         score=current_status_new.score,
                                                                                          precursor_mass = current_status_new.precursor_mass,
                                                                                             report_mass = current_status_new.current_mass,
+                                                                                             pep=current_status_new.pep,
+                                                                                            pep_mass=current_status_new.pep_mass,
                                                                                         score_list=deepcopy(current_status_new.score_list),
                                                                                         mass_diff=mass_diff,  
-                                                                                        rank=current_status_new.rank,
                                                                                         isotope_shift=current_status_new.isotope_shift)
                     else:
                         pool.put(current_status_new)
@@ -248,7 +269,7 @@ class Inference_label_comp_o(object):
             for current_status in current_status_pool.pool:
                 tgt.append(torch.tensor(current_status.inference_seq))
                 mass_list = torch.tensor(current_status.mass_list)
-                cterm_mass = current_status.precursor_mass - current_status.nmass
+                cterm_mass = current_status.glycan_mass - current_status.nmass
                 current_mass.append(torch.stack([current_status.nmass,cterm_mass],dim=1))
                 current_cross_atte_mass.append(torch.stack([current_status.nmass,mass_list],dim=1))
                 parent_mono_lists.append(mass_list)

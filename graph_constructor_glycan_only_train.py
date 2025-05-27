@@ -34,6 +34,7 @@ mono_composition = {
     'A': Composition('C11H19O9N') - Composition('H2O'),
     'G': Composition('C11H19O10N') - Composition('H2O'),
     'F': Composition('C6H12O5') - Composition('H2O'),
+    'X': Composition('C5H10O5') - Composition('H2O'),
 }
 id2mass = {k: v.mass for k, v in mono_composition.items()}
 def read_mgf(file_path):
@@ -106,9 +107,7 @@ class PeakFeatureGeneration:
         mask = np.logical_and(right_boundary>mz,left_boundary<mz)
         return mask
 
-    def local_significantCal(self, mask, intensity): #This feature need to be fixed use signal to ratio to replace intensity.
-        #这个feature为了要映射到[1,+infinity)并且不让tan在正无穷和负无穷之间来回横跳，特意在最小intentisy的基础上减了0.5
-        #让原始值到不了1
+    def local_significantCal(self, mask, intensity): 
         local_significant=[]
         for i in range(len(intensity)):
             local_intensity_list = intensity[mask[i]]
@@ -159,7 +158,7 @@ class GraphGenerator:
         self.candidate_mass = candidate_mass
         self.data_acquisition_upper_limit = data_acquisition_upper_limit
         self.peak_feature_generation = PeakFeatureGeneration(local_sliding_window,data_acquisition_upper_limit)
-        self.c_term_ion_list = ['1y','1y-H2O', '1y-H2O2','2y','2y-H2O','2y-H2O2', '3y', '3y-H2O']
+        self.c_term_ion_list = ['1y','1y-H2O', '1y-H2O','2y','2y-H2O','2y-H2O', '3y', '3y-H2O']
         self.label_ratio = []
         
     def __call__(self, scan, glycan, product_ions_moverz, product_ions_intensity, precursor_ion_mass, muti_charged, glycan_data=False, pep_mass=None):
@@ -259,16 +258,16 @@ class GraphGenerator:
         node_2y_mass_cterm, _ = self.record_filter(Ion.mass2mz(product_ions_moverz, 2), precursor_ion_mass, pep_mass)
         node_3y_mass_cterm, _ = self.record_filter(
             Ion.mass2mz(product_ions_moverz, 3), precursor_ion_mass, pep_mass)
-        node_1z_mass_cterm, _ = self.record_filter(product_ions_moverz+Composition('O').mass,precursor_ion_mass, pep_mass)
-        node_2z_mass_cterm, _ = self.record_filter(node_2y_mass_cterm+ Composition('O').mass, precursor_ion_mass,pep_mass)
-        node_3z_mass_cterm, _ = self.record_filter(node_3y_mass_cterm+ Composition('O').mass,precursor_ion_mass, pep_mass)
+        # node_1z_mass_cterm, _ = self.record_filter(product_ions_moverz+Composition('O').mass,precursor_ion_mass, pep_mass)
+        # node_2z_mass_cterm, _ = self.record_filter(node_2y_mass_cterm+ Composition('O').mass, precursor_ion_mass,pep_mass)
+        # node_3z_mass_cterm, _ = self.record_filter(node_3y_mass_cterm+ Composition('O').mass,precursor_ion_mass, pep_mass)
 
         if muti_charged:
             graphnode_mass = np.concatenate(
-                [node_1y_mass_cterm, node_1z_mass_cterm,node_2y_mass_cterm,node_2z_mass_cterm, node_3y_mass_cterm,node_3z_mass_cterm])  # node_1a_mass_nterm,node_1b_mass_nterm,
+                [node_1y_mass_cterm,node_2y_mass_cterm, node_3y_mass_cterm])  # node_1a_mass_nterm,node_1b_mass_nterm,
         else:
             graphnode_mass = np.concatenate(
-                [node_1y_mass_cterm,node_1z_mass_cterm, node_2y_mass_cterm,node_2z_mass_cterm])  # node_1a_mass_nterm,node_1b_mass_nterm,
+                [node_1y_mass_cterm, node_2y_mass_cterm])  # node_1a_mass_nterm,node_1b_mass_nterm,
         graphnode_mass = np.unique(graphnode_mass-(pep_mass-self.mass_error_da))
 
         graphnode_mass = np.insert(graphnode_mass,
@@ -320,7 +319,7 @@ class GraphGenerator:
     
     def graph_label_generator(self, glycans, node_mass, precursor_ion_mass):
         theo_glopeptide_mass = [0]
-        
+        # print('glycans',glycans)
         glyan_ions = [0]
         for ion in glycans.fragments(kind='Y', max_cleavages=5):
             # print(ion.kind, ion.mass, [MonosaccharideResidue.from_monosaccharide(node).residue_name() for node in fragment_to_substructure(ion, glycan).iternodes(method='bfs')])
@@ -344,13 +343,13 @@ class GraphGenerator:
         graph_label[-1] = 1
         return graph_label
 
-mono_names = ['Man', 'GlcNAc', 'NeuAc', 'NeuGc', 'Fuc']
+mono_names = ['Man', 'GlcNAc', 'NeuAc', 'NeuGc', 'Fuc', 'Xyl']
 def convert2glycoCT(structure_encoding):
     idx = 0
     
     structure_encoding = structure_encoding.replace(')', ']')
     structure_encoding = structure_encoding.replace('(', '[')
-    p_lst= ['H','N','A','G','F']
+    p_lst= ['H','N','A','G','F', 'X']
     for i in p_lst:
         if i in structure_encoding:
             structure_encoding = structure_encoding.replace(i,str(p_lst.index(i) + 1))
@@ -365,8 +364,9 @@ def convert2glycoCT(structure_encoding):
     try:
         struc_lst = json.loads(structure_encoding)
     except:
-        return False
         print(structure_encoding)
+        return False
+        
     root = mono_names[struc_lst[0] - 1]
     glycan = glypy.Glycan(root=glypy.monosaccharides[root])
     glycan = construct_glycan(glycan.root, glycan, struc_lst[1:], 0)
@@ -388,7 +388,7 @@ graph_gen = GraphGenerator(candidate_mass,all_edge_mass)
 
 if __name__=='__main__':
     worker, total_worker, file_path, csv_filename = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
-    psm_head = pd.read_csv(os.path.join(file_path, csv_filename), index_col='Scan')
+    psm_head = pd.read_csv(os.path.join(file_path, csv_filename), index_col='Scan', delimiter='\t')
     print(len(psm_head), getsizeof(psm_head))
     spectra_per_worker = int(len(psm_head)/total_worker)
     print('spectra_per_worker', spectra_per_worker)
@@ -422,10 +422,11 @@ if __name__=='__main__':
             seq = re.sub('[^a-zA-Z]+', '', seq)
             spec_index = source_file +'.raw'+ str(int(spec_index))
             product_ion_info = all_spectra[spec_index]
-            if glycan_mass + pep_mass_given - precursor_ion_mass > 1:
-                print(spec_index, glycan_mass + pep_mass_given - precursor_ion_mass)
+            # if glycan_mass + pep_mass_given - precursor_ion_mass > 1:
+            #     print(spec_index, glycan_mass + pep_mass_given - precursor_ion_mass)
             product_ions_moverz, product_ions_intensity = product_ion_info['product_ions_moverz'], product_ion_info['product_ions_intensity']
-            glycans = list(re.sub('[^a-zA-Z]+', '', glycan_ids))
+            # glycans = list(re.sub('[^a-zA-Z]+', '', glycan_ids))
+            glycans = convert2glycoCT(glycan_ids)
             node_mass, node_input, rel_input, edge_mask, graph_labels = graph_gen(spec_index, glycans, product_ions_moverz, product_ions_intensity, precursor_ion_mass, precursor_charge>2,glycan_data=True, pep_mass=pep_mass_given)
             record = {'node_mass':node_mass,
                       'node_input':node_input,
@@ -437,4 +438,3 @@ if __name__=='__main__':
             index_writer.write('{},{},{},{},{},{},{},{},{},{},{} \n'.format(spec_index,seq,precursor_charge,precursor_ion_mass,node_mass.size,"{}_{}_{}_train.msgp".format(csv_filename, worker, file_num),writer.tell(),len(compressed_data),glycan_ids, pep_mass_given,glycan_mass))
             writer.write(compressed_data)
             sum_vec = []
-    print(sum(graph_gen.label_ratio) / len(graph_gen.label_ratio))

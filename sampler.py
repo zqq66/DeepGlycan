@@ -4,7 +4,7 @@ import torch.distributed as dist
 from torch.utils.data import Sampler
 from copy import deepcopy
 
-class RnovaBucketBatchSampler(Sampler):
+class DGBucketBatchSampler(Sampler):
     """Wraps another sampler to yield a mini-batch of indices.
 
     Args:

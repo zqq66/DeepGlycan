@@ -5,7 +5,7 @@ import pickle
 from torch.utils.data import Dataset
 
 
-class GenovaDataset(Dataset):
+class DGDataset(Dataset):
     def __init__(self, cfg, aa_dict, spec_header, dataset_dir_path):
         super().__init__()
         self.cfg = cfg
@@ -25,9 +25,11 @@ class GenovaDataset(Dataset):
                 print(error)
 
         node_mass = torch.Tensor(spec['node_mass'])
-        precursor_mass = spec_head['Glycan mass']
+        glycan_mass = spec_head['Glycan mass']
+        precursor_mass = spec_head['mass']
         pep_mass = spec_head['pep mass given']
         charge = spec_head['Charge']
+        pep = spec_head['pep']
 
         node_feature = spec['node_input']['node_feat'][:, 0, :-1]
         node_sourceion = spec['node_input']['node_sourceion'][:, 0]
@@ -40,12 +42,16 @@ class GenovaDataset(Dataset):
 
         # decoder input
         if 'graph_label' in spec.keys():
+            seq = spec_head['Glycan Stru']
             graph_label = torch.tensor(spec['graph_label'])
+            isotope = None
         else:
             graph_label = None
+            seq = None
+            isotope = spec_head['Isotope Shift']
 
         tgt = [0] 
-        glycan_mass_embeded = torch.DoubleTensor([0, precursor_mass])
+        glycan_mass_embeded = torch.DoubleTensor([0, glycan_mass])
         glycan_crossattn_mass = torch.concat(
             [torch.DoubleTensor([0, 0]) / i for i in range(1, self.cfg.model.max_charge + 1)], dim=-1)
 
@@ -57,14 +63,16 @@ class GenovaDataset(Dataset):
                 'predecessors': predecessors,
                 'graph_label': graph_label,
                 'tgt': tgt,
+                'seq': seq,
                 'glycan_mass_embeded': glycan_mass_embeded,
                 'glycan_crossattn_mass': glycan_crossattn_mass,
-          #      'seq': seq,
+                'glycan_mass': glycan_mass,
                 'precursor_mass': precursor_mass,#+ori_idx % self.shift_range+self.cfg.inference.min_isotope_shift,
-                'isotope_shift': spec_head['Isotope Shift'],
+                'isotope_shift': isotope,
                 'pep_mass': pep_mass,
                 'precursor_charge': charge,
                 'psm_index': spec_head['Spec Index'],
+                'pep': pep
                # 'rank': spec_head['glycan']
                 }
 

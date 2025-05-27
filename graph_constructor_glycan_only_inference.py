@@ -9,12 +9,16 @@ import pickle
 import numpy as np
 import pandas as pd
 import more_itertools
+import collections
 from glob import glob
 import itertools as it
+import math
 from sys import getsizeof
 from BasicClass import Residual_seq, Ion, Composition
 from itertools import combinations_with_replacement
 from edge_matrix_gen import typological_sort_floyd_warshall
+from scipy.spatial import cKDTree
+from concurrent.futures import ProcessPoolExecutor
 
 EPS = 1e-8
 
@@ -63,11 +67,11 @@ def read_mgf(file_path):
                     product_ions_intensity.append(int(float(product_ion_intensity)))
                 elif line.startswith('END IONS'):
                     moverzs =np.array(product_ions_moverz)
-                    start_index = moverzs.searchsorted(diag_ion - 0.05)
-                    end_index = moverzs.searchsorted(diag_ion + 0.05)
+                    start_index = moverzs.searchsorted(diag_ion - 0.02)
+                    end_index = moverzs.searchsorted(diag_ion + 0.02)
                     diag_int = np.concatenate([product_ions_intensity[start:end] for start, end in zip(start_index, end_index)])
                     # print(diag_int, diag_int>1e5, 1e5)
-                    if np.any(diag_int>1e5):# np.any(end_index > start_index): #
+                    if np.any(diag_int>1e5): #and np.any(abs(moverzs-308.098) < 0.02):# np.any(end_index > start_index): #
                         rawfile = file.split('.')[0].split('/')[-1] + '.raw'
                         raw_mgf_blocks[rawfile + scan] = {'product_ions_moverz': np.array(product_ions_moverz),
                                                         'product_ions_intensity': np.array(product_ions_intensity)}
@@ -77,9 +81,46 @@ def read_mgf(file_path):
         pickle.dump(raw_mgf_blocks, f)
     with open(os.path.join(file_path, 'filtered_precursor.pkl'), 'wb') as f:
         pickle.dump(all_pre, f)
-    return raw_mgf_blocks
+    return raw_mgf_blocks, all_pre
 
+def within_tol_kdtree(A, B, eps):
+    A = np.asarray(A).reshape(-1,1)
+    B = np.asarray(B).reshape(-1,1)
+    tree = cKDTree(B)            # O(M log M)
+    # for each point in A find the distance to its nearest neighbor in B
+    dists, _ = tree.query(A, k=1)  # O(N log M)
+    return dists <= eps
 
+class PepMass:
+    def __init__(self, poss_pep, poss_pep_mass):
+        self.theo_mass = [self.find_theo_pep_mass(pep) for pep in poss_pep]
+        self.poss_pep_mass = poss_pep_mass
+        self.poss_pep = poss_pep
+    def find_theo_pep_mass(self, pep):
+        pep_theo_mass = np.array([Ion.peptide2ionmz(pep[:i],'b',1) for i in range(1,len(pep)+1)])
+        pep_theo_mass = np.concatenate((pep_theo_mass, np.array([Ion.peptide2ionmz(pep[:i],'a',1) for i in range(1,len(pep)+1)])),axis=0)
+        pep_theo_mass = np.concatenate((pep_theo_mass, np.array([Ion.peptide2ionmz(pep[:i],'b',2) for i in range(1,len(pep)+1)])),axis=0)
+        pep = pep[::-1]
+        pep_theo_mass = np.concatenate((pep_theo_mass, np.array([Ion.peptide2ionmz(pep[:i],'y',1) for i in range(1,len(pep)+1)])),axis=0)
+        
+        return pep_theo_mass
+    def find_match(self,spec_index, threshold=0.02):
+        available_mass = []
+        product_ions_moverz = all_spectra[spec_index]['product_ions_moverz']
+        precursor_ion_mass = all_pre[spec_index]['precursor_mass']
+        for i, theo_mass in enumerate(self.theo_mass):
+            glycan_mass = precursor_ion_mass - self.poss_pep_mass[i]
+            if glycan_mass > 4000 or glycan_mass < 0:
+                continue
+            glycan_masses = np.array([glycan_mass, glycan_mass-1.0033548378, glycan_mass+1.0033548378])
+            glycan_match = within_tol_kdtree(glycan_masses, masses_array, threshold)
+            if not np.any(glycan_match):
+                matches = within_tol_kdtree(theo_mass, product_ions_moverz, threshold).reshape(4,-1)
+                matches = np.any(matches, axis=0)
+                if np.sum(matches) >= math.floor(0.5 * (len(self.poss_pep[i]))):
+                    available_mass.append((glycan_mass, self.poss_pep_mass[i],self.poss_pep[i],spec_index))
+        return available_mass
+    
 class PeakFeatureGeneration:
     def __init__(self, local_sliding_window, data_acquisition_upper_limit):
         self.local_sliding_window = local_sliding_window
@@ -120,8 +161,6 @@ class PeakFeatureGeneration:
         return mask
 
     def local_significantCal(self, mask, intensity): #This feature need to be fixed use signal to ratio to replace intensity.
-        #这个feature为了要映射到[1,+infinity)并且不让tan在正无穷和负无穷之间来回横跳，特意在最小intentisy的基础上减了0.5
-        #让原始值到不了1
         local_significant=[]
         for i in range(len(intensity)):
             local_intensity_list = intensity[mask[i]]
@@ -375,18 +414,67 @@ def separate_fasta(fasta_file, enzyme, miss_cleavaged):
                 protein_seq = ''.join(proteins)
                 split_strings = subsequences_starting_and_ending_with_KR(protein_seq, enzyme)
 
-                print(name, split_strings)
                 # max len < 40; miss_cleavage = 3
                 for s in split_strings:
                     if len(s) < 40 and  sum(s.count(i) for i in enzyme) <= miss_cleavaged:
-                        pattern = r'N.[ST]'
+                        pattern = r'[ST]'
                         match = re.search(pattern, s)
                         if match:
-                            print('motif', s)
                             motif_n_pep.append(s)
-                            
+    print('number of motif in this sample', len(motif_n_pep))          
     return motif_n_pep
+def mask_filter(mass_list, pep_mass=None):
+    if pep_mass:
+        mask = mass_list >= 0
+        return mass_list[mask], mask
+def peptide_rescoring(product_ions_moverz, product_ions_intensity, precursor_ion_mass):
+    node_pep_y_mass, mask = mask_filter(precursor_ion_mass-Ion.peak2sequencemz(product_ions_moverz,'1y'),precursor_ion_mass)
+    node_pep_y_mass_int = product_ions_intensity[mask]
+    node_pep_2y_mass, mask = mask_filter(precursor_ion_mass-Ion.peak2sequencemz(product_ions_moverz,'2y'),precursor_ion_mass)
+    node_pep_2y_mass_int = product_ions_intensity[mask]
+
+    node_pep_1z_mass, mask = mask_filter(precursor_ion_mass-Ion.peak2sequencemz(product_ions_moverz, '1z'),precursor_ion_mass)
+    node_pep_1z_mass_int = product_ions_intensity[mask]
+    node_pep_2z_mass, mask = mask_filter(precursor_ion_mass-Ion.peak2sequencemz(product_ions_moverz, '2z'),precursor_ion_mass)
+    node_pep_2z_mass_int = product_ions_intensity[mask]
+    node_pep_1a_mass, mask = mask_filter(Ion.peak2sequencemz(product_ions_moverz, '1a'),precursor_ion_mass)
+    node_pep_1a_mass_int = product_ions_intensity[mask]
+    node_pep_1b_mass, mask = mask_filter(Ion.peak2sequencemz(product_ions_moverz, '1b'),precursor_ion_mass)
+    node_pep_1b_mass_int = product_ions_intensity[mask]
     
+    graphnode_mass = np.concatenate(
+            [node_pep_y_mass,node_pep_2y_mass, node_pep_1z_mass, node_pep_2z_mass, node_pep_1a_mass, node_pep_1b_mass])#, node_1z_mass_cterm,node_2z_mass_cterm, node_3z_mass_cterm])  # node_1a_mass_nterm,node_1b_mass_nterm,
+    graphnode_mass_int = np.concatenate([node_pep_y_mass_int,node_pep_2y_mass_int, node_pep_1z_mass_int, node_pep_2z_mass_int, node_pep_1a_mass_int, node_pep_1b_mass_int])#, node_1z_mass_cterm_int, node_2z_mass_cterm_int, node_3z_mass_cterm_int])
+    
+    unique_values, inverse_indices = np.unique(graphnode_mass, return_inverse=True)
+    unique_values =  np.sort(unique_values)
+    rel_inten = graphnode_mass_int#/graphnode_mass_int.max()
+    # print(graphnode_mass_int.shape,graphnode_mass.shape )
+    # Sum the values in array2 grouped by unique values in array1
+    # sums = np.bincount(inverse_indices, weights=graphnode_mass_int)
+    
+    sums = [np.sum(rel_inten[graphnode_mass == value]) for value in unique_values]
+    sums = np.array(sums)
+    return unique_values, sums
+
+def peptides_filtering(pep, product_ions_moverz, product_ions_intensity, pep_mass):
+    pep_theo_mass = np.insert(Residual_seq(pep).step_mass,0,0)
+    pep_observe_mass, pep_observe_mass_inten = peptide_rescoring(product_ions_moverz, product_ions_intensity, pep_mass)
+    pep_low_index = pep_observe_mass.searchsorted(pep_theo_mass-0.02)
+    pep_high_index = pep_observe_mass.searchsorted(pep_theo_mass+0.02)
+    # print(low_index, high_index)
+    pep_score = 0
+    pep_matched = 0
+    for i, (pep_low, pep_high) in enumerate(zip(pep_low_index, pep_high_index)):
+        
+        if pep_low < pep_high:
+            # print(theo_mass[i],observe_mass[low : high], low, high)
+            pep_matched+= 1
+            for j in range(pep_low, pep_high):
+                pep_score += np.log(pep_observe_mass_inten[j])*(1-(np.abs(pep_theo_mass[i]-pep_observe_mass[j])/0.05)**4)
+    pep_ratio = pep_matched/len(product_ions_moverz)
+    pep_score *= pep_matched/len(pep_theo_mass)
+    return pep_ratio, pep_score
 
 graph_gen = GraphGenerator(candidate_mass,all_edge_mass)
 if __name__=='__main__':
@@ -402,60 +490,79 @@ if __name__=='__main__':
             all_pre = pickle.load(f)
             print('mgf file loaded')
     else:
-        all_spectra = read_mgf(file_path)
+        all_spectra, all_pre = read_mgf(file_path)
         print('spectrum read done')
-    spectra_per_worker = int(len(all_spectra) / total_worker)
-    print('spectra_per_worker', spectra_per_worker)
-    start_i, end_i = spectra_per_worker * (worker - 1), spectra_per_worker * worker
-    psm_head = list(all_spectra.keys())[start_i:end_i]
-    
-    motif_n_pep = separate_fasta(fasta_file,enzyme,miss_cleavaged)
+    # '''
+    # rescore peptide 
+    # motif_n_pep = separate_fasta(fasta_file,enzyme,miss_cleavaged)
+    with open('/home/q359zhan/olinked/data/bladder-cancer/peptide.txt', 'r') as f:
+        motif_n_pep = f.readlines()
     poss_pep_mass = []
+    poss_pep = []
     for pep in motif_n_pep:
+        pep = pep.strip().replace('J','N')
+        # print(pep)
         pep_mass = Residual_seq(pep).mass + Composition('H2O').mass + Composition('proton').mass
         if pep_mass <=4000:
-            print(pep, pep_mass)
             poss_pep_mass.append(pep_mass)
-
+            poss_pep.append(pep)
+    psm_head = list(all_spectra.keys())
+    pep_class = PepMass(poss_pep, poss_pep_mass)
+    glycan_freq = dict()
+    n_cores = os.cpu_count()
+    print('Number of cores:', n_cores)
+    with ProcessPoolExecutor(max_workers=n_cores) as exe:
+        results= list(exe.map(pep_class.find_match, psm_head))
+        print(len(results))
+    glycan_freq = dict()
+    for i in results:
+        for (glycan_mass, pep_mass_given, pep,spec_index) in i:
+            glycan_mass = round(glycan_mass, 4)
+            if glycan_mass in glycan_freq.keys():
+                glycan_freq[glycan_mass].append((spec_index, pep, pep_mass_given))
+            else:
+                glycan_freq[glycan_mass] = [(spec_index, pep, pep_mass_given)]
+    for k in sorted(glycan_freq.keys())[:90]:
+        filtered_lst += copy.deepcopy(glycan_freq[k])
+    # '''
+    # with open('/home/q359zhan/olinked/data/alzheimer/disease-mgf/filtered_lst_all_pep_100.pkl', 'rb') as f:
+    #     filtered_lst = pickle.load(f)
+    spectra_per_worker = int(len(filtered_lst) / total_worker)
+    print('spectra_per_worker', spectra_per_worker)
+    start_i, end_i = spectra_per_worker * (worker - 1), spectra_per_worker * worker
+    psm_head = filtered_lst[start_i:end_i]
     with open(os.path.join(file_path,f'{csv_filename}_{worker}_all_pep_mass.csv'), 'w') as index_writer:
         if total_worker >=10:
             if worker == 10:
-                index_writer.write('Spec Index,Charge,mass,pep mass given,Node Number,MSGP File Name,MSGP Datablock Pointer,MSGP Datablock Length,Glycan mass,Isotope Shift\n')
+                index_writer.write('Spec Index,Charge,mass,pep mass given,pep,Node Number,MSGP File Name,MSGP Datablock Pointer,MSGP Datablock Length,Glycan mass,Isotope Shift\n')
         else:
             if worker == 1:
-                index_writer.write('Spec Index,Charge,mass,pep mass given,Node Number,MSGP File Name,MSGP Datablock Pointer,MSGP Datablock Length,Glycan mass,Isotope Shift\n')
-
+                index_writer.write('Spec Index,Charge,mass,pep mass given,pep,Node Number,MSGP File Name,MSGP Datablock Pointer,MSGP Datablock Length,Glycan mass,Isotope Shift\n')
         i=0
-        for spec_index in psm_head:
-            spec_index = spec_index.strip()
-            for pep_mass_given in poss_pep_mass:
-                product_ion_info = all_spectra[spec_index]
-                precursor_ion_mass = all_pre[spec_index]['precursor_mass']
-                precursor_charge = all_pre[spec_index]['precursor_charge']
-                if pep_mass_given > precursor_ion_mass:
-                    continue
-                                
-                product_ions_moverz, product_ions_intensity = copy.copy(product_ion_info['product_ions_moverz']), copy.copy(product_ion_info['product_ions_intensity'])
+        print('number of possible glycans', len(filtered_lst))
+        for spec_index, pep, pep_mass_given in psm_head:
+            product_ion_info = all_spectra[spec_index]
+            precursor_ion_mass = all_pre[spec_index]['precursor_mass']
+            precursor_charge = all_pre[spec_index]['precursor_charge']
+            product_ions_moverz, product_ions_intensity = copy.copy(product_ion_info['product_ions_moverz']), copy.copy(product_ion_info['product_ions_intensity'])
+
+            for iso in [-1, 0, 1]:#range(-1, 3):
+                file_num = i//4000
+                if i%4000==0:
+                    try: writer.close()
+                    except: pass
+                    writer = open(os.path.join(file_path,f'{csv_filename}_{worker}_{file_num}_all_pep_mass.msgp'),'wb')
+                i += 1
+                node_mass, node_input, rel_input, edge_mask = graph_gen(spec_index, product_ions_moverz, product_ions_intensity, precursor_ion_mass+iso*Composition('proton').mass, precursor_charge>2,mode,glycan_data=True, pep_mass=pep_mass_given, decoy=False)
+                glycan_mass = precursor_ion_mass+iso*1.0033548378 - pep_mass_given
                 
-                for iso in [-1, 0, 1]:#range(-1, 3):
-                    file_num = i//4000
-                    print(i%4000)
-                    if i%4000==0:
-                        try: writer.close()
-                        except: pass
-                        writer = open(os.path.join(file_path,f'{csv_filename}_{worker}_{file_num}_all_pep_mass.msgp'),'wb')
-
-                    i += 1
-                    node_mass, node_input, rel_input, edge_mask = graph_gen(spec_index, product_ions_moverz, product_ions_intensity, precursor_ion_mass+iso*Composition('proton').mass, precursor_charge>2,mode,glycan_data=True, pep_mass=pep_mass_given, decoy=False)
-                    glycan_mass = precursor_ion_mass+iso*Composition('proton').mass - pep_mass_given
-
-                    record = {'node_mass':node_mass,
-                            'node_input':node_input,
-                            'rel_input':rel_input,
-                            'edge_input':edge_mask}
-                    compressed_data = gzip.compress(pickle.dumps(record))
-                    # for path in sum_vec:
-                    #     print(path)
-                    index_writer.write('{},{},{},{},{},{},{},{},{},{}\n'.format(spec_index,precursor_charge,precursor_ion_mass+iso*Composition('proton').mass,pep_mass_given, node_mass.size,"{}_{}_{}_all_pep_mass.msgp".format(csv_filename, worker, file_num),writer.tell(),len(compressed_data),glycan_mass,iso))
-                    writer.write(compressed_data)
-                    sum_vec = []
+                record = {'node_mass':node_mass,
+                        'node_input':node_input,
+                        'rel_input':rel_input,
+                        'edge_input':edge_mask}
+                compressed_data = gzip.compress(pickle.dumps(record))
+                # for path in sum_vec:
+                #     print(path)
+                index_writer.write('{},{},{},{},{},{},{},{},{},{},{}\n'.format(spec_index,precursor_charge,precursor_ion_mass+iso*Composition('proton').mass,pep_mass_given,pep, node_mass.size,"{}_{}_{}_all_pep_mass.msgp".format(csv_filename, worker, file_num),writer.tell(),len(compressed_data),glycan_mass,iso))
+                writer.write(compressed_data)
+                sum_vec = []

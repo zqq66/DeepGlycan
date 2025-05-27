@@ -27,39 +27,6 @@ class SinusoidalPositionEmbedding(nn.Module):
         return torch.concat([pe_sin, pe_cos], dim=-1).float()
 
 
-class GlycanSeqIndexFirstEmbedding(nn.Module):
-    def __init__(self, hidden_size, max_len, aa_dict_size):
-        super().__init__()
-        self.tgt_token_embedding = nn.Embedding(aa_dict_size, hidden_size)
-        self.idx_token_embedding = nn.Embedding(max_len, hidden_size)
-        self.pos_embedding = SinusoidalPositionEmbedding(hidden_size)
-        self.hidden_size = hidden_size
-
-    def forward(self, tgt, pos_index):
-
-        # print('mono_type', tgt[:, 2::2])
-        mono_type = tgt[:, 2::2]  # Takes elements at even positions
-        parent_index = tgt[:, 1::2]
-        # print('mono_type', mono_type, 'parent_index', parent_index)
-        mono_embeddings = self.tgt_token_embedding(mono_type).cuda()
-        tgt_embeddings = torch.zeros((tgt.shape[0], tgt.shape[1], self.hidden_size)).cuda()
-        # if odd_indices.shape[-1] > 0:
-        idx_embeddings = self.idx_token_embedding(parent_index).cuda()
-        idx_position = torch.zeros(idx_embeddings.shape).cuda()
-        idx_position[:, :idx_embeddings.shape[1], :] = self.pos_embedding(parent_index)
-        tgt_embeddings[:, 1::2, :] = idx_embeddings
-        if mono_type.shape[1] < parent_index.shape[1]:
-            tgt_embeddings[:, 2::2, :] = mono_embeddings + idx_position[:, :-1, :]
-
-        else:
-            tgt_embeddings[:, 2::2, :] = mono_embeddings + idx_position
-        # tgt = self.tgt_token_embedding(tgt)
-        # print('tgt_embeddings', tgt_embeddings.shape)
-        tgt_embeddings[:, 0, :] = self.tgt_token_embedding(tgt[:, 0]).cuda()
-        tgt_embeddings = tgt_embeddings + self.pos_embedding(pos_index)
-        return tgt_embeddings
-
-
 class GlycanSeqEmbedding(nn.Module):
     def __init__(self, hidden_size, max_len, aa_dict_size):
         super().__init__()
@@ -107,7 +74,7 @@ class SpectraEmbedding(nn.Module):
         return src
 
 
-class Rnova(nn.Module):
+class DeepGlycan(nn.Module):
     # output size: 5 mono residues + bos
     def __init__(self, cfg, mass_list, id2mass, seq_max_len=64, aa_dict_size=8, output_size=5) -> None:
         super().__init__()

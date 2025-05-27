@@ -2,7 +2,7 @@ import torch
 from torch.nn.functional import pad
 
 
-class GenovaCollator(object):
+class DGCollator(object):
     def __init__(self, cfg):
         self.cfg = cfg
 
@@ -26,15 +26,17 @@ class GenovaCollator(object):
         rel_mask = torch.stack(
             [pad(torch.ones_like(record['node_mass'], dtype=bool), (0, max_nodenum - nodenum[i])) for i, record in
              enumerate(batch)]).unsqueeze(1).unsqueeze(-1)
-        if batch[0]['graph_label']:
+        if batch[0]['graph_label'] is not None:
             label = torch.stack(
                 [pad(record['graph_label'], (0, max_nodenum - nodenum[i])) for i, record in enumerate(batch)])
             label_mask = torch.stack(
                 [pad(torch.ones_like(record['graph_label'], dtype=bool), (0, max_nodenum - nodenum[i])) for i, record in
                 enumerate(batch)])
+            seq = [record['seq'] for record in batch]
         else:
             label = None
             label_mask = None
+            seq = None
 
         encoder_input = {
             'node_feature': node_feature,
@@ -53,9 +55,10 @@ class GenovaCollator(object):
 
  #       seq = [record['seq'] for record in batch]
         precursor_mass = [record['precursor_mass'] for record in batch]
+        glycan_mass =  [record['glycan_mass'] for record in batch]
         pep_mass = [record['pep_mass'] for record in batch]
         charge = [record['precursor_charge'] for record in batch]
-
+        pep = [record['pep'] for record in batch]
         psm_index = [record['psm_index'] for record in batch]
 #        rank = [record['rank'] for record in batch]
         isotope_shift = [record['isotope_shift'] for record in batch]
@@ -66,4 +69,4 @@ class GenovaCollator(object):
                          'node_mass': node_mass,
                          'rel_mask': rel_mask}
 
-        return encoder_input, decoder_input, precursor_mass, pep_mass, psm_index, isotope_shift, charge, label, label_mask
+        return encoder_input, decoder_input,seq, precursor_mass, pep_mass,glycan_mass, psm_index, pep, isotope_shift, charge, label, label_mask

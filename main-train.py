@@ -12,7 +12,7 @@ from torch.cuda.amp import GradScaler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import logging
-from GlycopepECHO import Rnova
+from DeepGlycan import Rnova
 from dataset import GenovaDataset
 from collator import  GenovaCollator
 from prefetcher import DataPrefetcher
@@ -53,8 +53,9 @@ mono_composition = {
     'neuAc': Composition('C11H19O9N') - Composition('H2O'),
     'neuGc': Composition('C11H19O10N') - Composition('H2O'),
     'fuc': Composition('C6H12O5') - Composition('H2O'),
+    'xyl': Composition('C5H10O5') - Composition('H2O'),
 }
-label_mono = ['H', 'N', 'A', 'G', 'F']
+label_mono = ['H', 'N', 'A', 'G', 'F', 'X']
 name2id = {aa:i for i, aa in enumerate(mono_composition)}
 label_name2id = {aa:i for i, aa in enumerate(label_mono)}
 tokenize_aa_dict = {aa: i for i, aa in enumerate(mono_composition)}

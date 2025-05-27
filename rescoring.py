@@ -17,6 +17,7 @@ mono_composition = {
     'A': Composition('C11H19O9N') - Composition('H2O'),
     'G': Composition('C11H19O10N') - Composition('H2O'),
     'F': (Composition('C6H12O5') - Composition('H2O')),
+    'X': (Composition('C5H10O5') - Composition('H2O')),
 }
 id2mass = {k: v.mass for k, v in mono_composition.items()}
 def find_fragments(sequence):
@@ -63,8 +64,14 @@ def graphnode_mass_generator(product_ions_moverz, product_ions_intensity, muti_c
    
     return unique_values, sums#[intensity_mask]
 
-
-
+def check_signature_ion(glycan):
+    signature_ion = []
+    if 'G' in glycan:
+        signature_ion.append(308.098)
+        signature_ion.append(290.087)
+        signature_ion.append(511.177)
+    
+    return np.array(signature_ion)
 
 if __name__=='__main__':
 
@@ -73,30 +80,41 @@ if __name__=='__main__':
     df2 = pd.read_csv(outputfile)
     with open(os.path.join(file_path, 'filtered_mgf.pkl'), 'rb') as f:
         spectrum = pickle.load(f)
-    print(list(spectrum.keys())[0])
-
+    with open(os.path.join(file_path, 'filtered_precursor.pkl'), 'rb') as f:
+        precursor = pickle.load(f)
+    df2 = df2[df2['mass difference'].astype(float)<=0.02]
     glycan_scores = []
     pep_scores = []
     glycan_ratios = []
     pep_ratios = []
     weighted_scores = []
-    peps=[]
+    df = pd.DataFrame(columns=df2.columns.tolist()+['GlycanScore'])
     for i, row in df2.iterrows():
         # print(row)
         spec = row['Spec']
+        
         # precursor_mh = precursor[spec]['precursor_mass']+row['isotope_shift']*Composition('proton').mass
         precursor_mh = float(row['mass'])
         # pep_mass = precursor_mh - float(row['label mass'])
         
         # pep_mass -= Composition('proton').mass
         pep_mass = row['Pep mass']
-        pep = row['Annotated Sequence']#mass2pep[round(pep_mass, 3)]
-        theo_mass = pep_mass + find_fragments(row['predicts'])
-        # charge = precursor[spec]['precursor_charge']
-        charge = row['Charge']
+        pep = row['predict pep']
+        theo_mass = pep_mass + find_fragments(row['predict'])
+        charge = precursor[spec]['precursor_charge']
+        # charge = row['Charge']
         product_ion_info = spectrum[spec]
         product_ions_moverz, product_ions_intensity = copy.copy(product_ion_info['product_ions_moverz']), copy.copy(product_ion_info['product_ions_intensity'])#/product_ion_info['product_ions_intensity'].max()
-    
+        product_ions_moverz_array = np.array(product_ions_moverz)
+        signature_ion = check_signature_ion(row['predict'])
+        start_sig = np.searchsorted(product_ions_moverz_array, signature_ion-0.02)
+        end_sig = np.searchsorted(product_ions_moverz_array, signature_ion+0.02)
+        
+        if not np.any(end_sig - start_sig > 0):
+            
+            # glycan_scores.append(glycan_score)
+            continue
+        print(spec,'start_sig',product_ions_moverz_array[start_sig], product_ions_intensity[start_sig])
         # peptide rescoring
         # pep = row['Peptide'].replace('J', 'N')
         pep_theo_mass = np.insert(Residual_seq(pep).step_mass,0,0)
@@ -118,12 +136,11 @@ if __name__=='__main__':
                     glycan_score += np.log(observe_mass_inten[j])*(1-(np.abs(theo_mass[i]-observe_mass[j])/0.05)**4)
         glycan_score *= matched/len(theo_mass)
         print('glycan_score', glycan_score)
-
+        df.loc[len(df)] = row.tolist()+[glycan_score]
         glycan_scores.append(glycan_score)
     # break
-    df2.insert(3, 'predict Pep', peps, True)
-    df2.insert(len(df2.columns), 'glycan rescoring',glycan_scores,  True)
+    # df2.insert(len(df2.columns), 'glycan rescoring',glycan_scores,  True)
 
-    max_idx = df2.groupby('Spec')['glycan rescoring'].idxmax()
-    result_df = df2.loc[max_idx]
+    max_idx = df.groupby('Spec')['GlycanScore'].idxmax()
+    result_df = df.loc[max_idx]
     result_df.to_csv(outputfile+'rescoring_max.csv',index=False)

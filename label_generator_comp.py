@@ -27,7 +27,7 @@ class LabelGenerator:
         return self
 
     def __next__(self):
-        encoder_input, decoder_input, seq, precursor_mass, pep_mass, psm_index, _, label, label_mask = next(self.inference_dl)
+        encoder_input, _, seq, _, _, glycan_mass,_, _,_,_, label, label_mask = next(self.inference_dl)
         if dist.is_initialized():
             mem = self.model.module.mem_get(**encoder_input)
         else:
@@ -36,7 +36,7 @@ class LabelGenerator:
         # tgt, mass_list, pos_indices = self.convert_sequence(seq)
         tgt, mass_list, pos_indices = self.generate_sequence(encoder_input, label, seq)
         pos_index = max(pos_indices)
-        tgt, glycan_mass, glycan_crossattn_mass,parent_mono_lists, tgt_label, tgt_label_mask = self.decoder_input_generator(tgt, mass_list, pos_indices, precursor_mass)
+        tgt, glycan_mass, glycan_crossattn_mass,parent_mono_lists, tgt_label, tgt_label_mask = self.decoder_input_generator(tgt, mass_list, pos_indices, glycan_mass)
 
         return ({'src': mem,
                  'tgt': tgt,
