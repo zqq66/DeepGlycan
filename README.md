@@ -1,24 +1,26 @@
-# GlycopepECHO
+# DeepGlycan
+
+Trained model and data is uploaded to https://drive.google.com/drive/folders/13AOGA8FIBkSl8HzWyvJ2BIPxmPgT-kTN
+
 
 ## Dependency
+Our codes are tested under Linux system with at least one GPU. Example files are tested by A100s.
+
+We recommend using conda to manage all dependency. After install conda
+
+> conda install -n DeepGlycan requirements.yaml
+
 > python setup.py build_ext --inplace
 
 ## De novo sequencing
-* Data preprocessing and peptide assignment
-  
-> bash inf_parallel_preprocess.sh 20 ${file_path} ${output_csv} "fragmentation mode(ethcd/scehcd)" ${output_csv} "enzyme cleavage site" ""miss cleavaged"
 
-"enzyme cleavage site" needs to elaborate all amino acids. For example, for trypsin, you should enter "KR"
+> bash inference.sh ${threads} ${file_path} ${output_csv} ${fragmentation} ${enzyme} ${miss_cleavaged} ${mass_cand} ${fasta}
 
-Note that by default file path also include MS/MS files in mgf format.
+> bash inference.sh 20 /home/olinked/data/test_igg igg_test.csv scehcd KR 3 0124 /home/olinked/data/test_igg/protein-IgG.fasta
 
-This will generate the input features required for model training, "preprocessed files" will be saved in the same directory as "file path"
+Example files can be downloaded from https://drive.google.com/drive/folders/1DQ5npo7t-4NYq0x51Ru1VabCcr5NjOCA?usp=sharing
 
-Preprocessing can take long, the second argument of the command can be set up based on the number of threads your computer can afford for preprocessing.
-
-* Model Inference
-> PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True CUDA_LAUNCH_BLOCKING=1 torchrun --standalone --nnodes=1 --nproc_per_node=5 main-inference-from-scratch.py inference.beam_size=9 test_spec_header_path=${file_path}/${output_csv} test_dataset_dir=${file_path}
-
+For human samples or o-linked data, we recommend to use 0124 (Hex, HexNAc, NeuAc, Fuc)as monosaccharide candidates, for other samples, 01234 (Hex, HexNAc, NeuAc, NeuGc, Fuc), is recommended.
 
 ## Training
 * Data preprocessing
