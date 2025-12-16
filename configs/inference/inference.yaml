@@ -1,0 +1,14 @@
+beam_size: 9
+mass_cand: 0,1,2,3,4
+fasta_file: /home/q359zhan/olinked/data/ethcd/heart/UP000000589_10090.fasta
+decoy_fasta: /home/q359zhan/olinked/data/ethcd/heart
+enzyme: KR
+miss_cleavaged: 2
+directory: /home/q359zhan/olinked/data/ethcd/heart/glycan/
+mode: N
+fragmentation: hcd
+isotope: '0'
+ms1_threshold: 5
+ms1_threshold_unit: ppm
+ms2_threshold: 0.02
+ms2_threshold_unit: Th

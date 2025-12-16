@@ -1,0 +1,28 @@
+defaults:
+  - model: base
+  - train: train
+  - sample: A100_40g
+  - data: data
+  - inference: inference
+  - _self_
+
+in_dir: /home/q359zhan/olinked/data/pxd035846-test
+out_dir: /home/q359zhan/olinked/data/pxd035846-test/filtered_mgf
+out_put_file:  glyco-engineer-inference-score.csv
+model_path: save/pglyco-ethcd-simple.pt
+mass_diff_threshold: 0.02
+
+mode: hcd
+
+mgf_preprocess:
+  glob_pattern: "*.mgf"
+  cluster_parquet: cluster.csv.parquet
+  fasta: /home/q359zhan/olinked/data/pxd035846-test/filtered_mgf/fc-gamma-receptor.txt
+  pep_csv: null
+  sig_mz: [138.055, 144.065, 168.066, 186.076, 204.087, 274.092, 292.103, 366.139]
+  ppm_tol: 20.0
+  min_rel_intensity: 0.01
+
+fdr:
+  output: glyco-engineer-inference-fdr.csv
+  fdr_threshold: 0.01

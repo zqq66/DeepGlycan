@@ -1,0 +1,12 @@
+# Ignore large or generated artifacts
+helper/
+output/
+outputs/
+save/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# IDE settings
+.vscode/

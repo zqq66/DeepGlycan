@@ -1,0 +1,7 @@
+hidden_size: 768
+num_layers: 6
+dropout_rate: 0
+n_head: 12
+n_head_per_mass_decoder: 12
+decoder_dropout_rate: 0
+max_charge: 1
