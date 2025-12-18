@@ -17,7 +17,6 @@ from data.BasicClass import Composition,Residual_seq
 from data.collator import DGCollator
 from data.prefetcher import DataPrefetcher
 from data.inference import OptimisedInference
-from pep_search import read_mgf
 from data.preprocess_dataset_optimized import GraphGeneratorOptimized
 from data.preprocess_dataset import GraphGenerator
 from concurrent.futures import ProcessPoolExecutor
@@ -57,8 +56,58 @@ aa_dict = {aa:i for i, aa in enumerate(mono_composition)}
 # aa_dict['<pad>'] = 0
 aa_dict['<bos>'] = len(aa_dict)
 tokenize_aa_dict = {i:aa for i, aa in enumerate(mono_composition)}
-detokenize_aa_dict = {i: round(aa.mass, 3) for i, aa in enumerate(mono_composition.values())}
+detokenize_aa_dict = {i:aa.mass for i, aa in enumerate(mono_composition.values())}
 detokenize_aa_dict[len(detokenize_aa_dict)] = 0
+def read_mgf(
+    file_path,
+    mode,
+):
+    
+    raw_mgf_blocks = []
+    for file in glob(os.path.join(file_path, '*.mgf')):
+        print('file', file)
+        with open(file) as f:
+            for line in f:
+                if line.startswith('BEGIN IONS'):
+                    product_ions_moverz = []
+                    product_ions_intensity = []
+                    mz = None
+                    z = None
+                    scan = None
+                elif line.startswith('PEPMASS'):
+                    mz = float(re.split(r'=|\r|\n|\s', line)[1])
+                elif line.startswith('CHARGE'):
+                    z = int(re.search(r'CHARGE=(\d+)\+', line).group(1))
+                elif line.startswith('TITLE'):
+                    scan_pattern = r'scan=(\d+)'
+                    m_ = re.search(scan_pattern, line)
+                    scan = m_.group(1) if m_ else None
+                elif line and line[0].isdigit():
+                    # Robust split on whitespace (some MGF writers use multiple spaces/tabs)
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        mz_i, I_i = parts[0], parts[1]
+                        product_ions_moverz.append(float(mz_i))
+                        product_ions_intensity.append(float(I_i))
+                elif line.startswith('END IONS'):
+                    # Basic sanity
+                    if mz is None or z is None or scan is None:
+                        continue
+                    mz_arr = np.asarray(product_ions_moverz, dtype=float)
+                    I_arr = np.asarray(product_ions_intensity, dtype=float)
+                    rawfile = file.split('.')[0].split('/')[-1] + '.'
+                    neutral_precursor_mass = mz * z - (z-1) * Composition('proton').mass
+                    raw_mgf_blocks.append(
+                        (
+                            rawfile + scan,
+                            mz_arr,
+                            I_arr,
+                            neutral_precursor_mass,
+                            z,
+                            mode,
+                        )
+                    )
+    return raw_mgf_blocks
 
 def evaluate(inference, rank, cfg):
     # run = wandb.init(
@@ -91,13 +140,10 @@ def evaluate(inference, rank, cfg):
             score =[i.item() for i in pool.score_list]
             inf_seq_r = [mono_comp_dict_reversed[i] for i in inf_seq]
             # print(psm_idx,'final',''.join(inf_seq_r), sum(score), pool.mass_diff, isotope_shift)
-            row = [psm_idx,isotope_shift,''.join(inf_seq_r), precursor_mass, report_mass, mass_diff,score,given_pep_mass,pep]
-            # inf_seq_r = collections.Counter(inf_seq_r)
-            # inf_seq_str = ''.join(f'{key}:{count} ' for key, count in inf_seq_r.items())                
+            row = [psm_idx,isotope_shift,''.join(inf_seq_r), precursor_mass, report_mass, mass_diff,score,given_pep_mass,pep]        
             rows.append(row)
 
-                # wandb.log({'accuracy_comp':sum(correct_comp)/len(correct_comp)})
-    with open(cfg.test_spec_header_path + cfg.out_put_file, mode='w', newline='') as file:
+    with open(Path(to_absolute_path(Path(cfg.out_dir) / cfg.out_put_file)), mode='w', newline='') as file:
         csv.writer(file).writerows(rows)
     logging.info('number of spectrum inferenced on test set'+str(len(rows)-1))
 
@@ -106,48 +152,43 @@ def evaluate(inference, rank, cfg):
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg:DictConfig):
-    # test why not found
-    
     psms = []
     spectrum = read_mgf(cfg.out_dir, cfg.mode.lower())
     scan_ids, m_over_zs, intensities, precursor_masses, charges, modes = zip(*spectrum)
     cluster_psm_path = Path(to_absolute_path(cfg.out_dir)) / "clustered_peptide_search.csv"
     cluster_psm = pd.read_csv(cluster_psm_path)
-    # pg = pd.read_csv('/home/q359zhan/olinked/data/ethcd/heart/mzml/heart-y4-standard-precursor-calibrated-try.csv')
-    # # pg = pg[pg['RawName'].str.contains('HEART-Y4')]
-    # # print(len(pg))
-    # # pg['Spec'] = pg['RawName']+'.'+pg['Scan'].astype(str)
-    # pg['PrecursorMH'] = pg['precursor_mz_calibrated'] * pg['Charge'] - (pg['Charge']-1) * Composition('proton').mass
-    # pg_dict = dict(zip(pg['SpectrumID'], pg['PrecursorMH']))
-    
+
+    # df_path = "/home/q359zhan/olinked/data/ethcd/heart/glycan/heart-y4-precursor-calibrated-inference.csv"  # change if needed
+    # df = pd.read_csv(df_path)
+    # df = df[df['mass difference'] < 0.02]
     for idx, row in tqdm(cluster_psm.iterrows(), total=cluster_psm.shape[0]):
-        # logging.info('Cluster '+ str(row['cluster']))
-        # if row['cluster'] != 3234:
-        #     continue
         target_peptides2mass = dict()
         top3_pep = ast.literal_eval(row['top3_pep'])
         scans = ast.literal_eval(row['scan'])
+        # print(scans, top3_pep)
         for j, s in enumerate(top3_pep):
             target_peptides2mass[s] = round(Residual_seq(s).mass + Composition('H2O').mass + Composition('proton').mass,5)
         
         if len(target_peptides2mass) > 0:
             graph_gen = GraphGenerator(target_peptides2mass,cfg.inference.isotope)
             for j in scans:
-                # if j == 'HEART-Y4.7310':
-                idx = scan_ids.index(j)
-                x = 20 + 10 * torch.rand(1)  # [20.0, 30.0)
-                decoy_value = x.item()
-                psms += graph_gen(scan_ids[idx],m_over_zs[idx],intensities[idx],precursor_masses[idx],charges[idx],modes[idx])
-                psms += graph_gen(scan_ids[idx]+'decoy',m_over_zs[idx],intensities[idx],precursor_masses[idx]+decoy_value,charges[idx],modes[idx])
+                if j in scan_ids: #and j in df['Spec'].to_list():
+                    # s = df[df['Spec']==j]['predict pep'].to_list()[0]
+                    # target_peptides2mass[s]=round(Residual_seq(s).mass + Composition('H2O').mass + Composition('proton').mass,5)
+                    idx = scan_ids.index(j)
+                    x = 20 + 10 * torch.rand(1)  # [20.0, 30.0)
+                    decoy_value = x.item()
+                    psms += graph_gen(scan_ids[idx],m_over_zs[idx],intensities[idx],precursor_masses[idx],charges[idx],modes[idx])
+                    psms += graph_gen(scan_ids[idx]+'decoy',m_over_zs[idx],intensities[idx],precursor_masses[idx]+decoy_value,charges[idx],modes[idx])
+                
         mass_list = [0]+list(detokenize_aa_dict.values())[:-1]
-        # logging.info('Number of spectrum '+ str(row['#scan']))
-        # logging.info('Number of peptides'+ str(len(target_peptides2mass)))
+        
     logging.info('preprocess done ' + str(len(psms)))
     # print(stop)
     train_ds = DGDataset(cfg, aa_dict, psms)
     collator = DGCollator(cfg)
     # train_sampler = DGBucketBatchSampler(cfg, train_spec_header)
-    train_dl = DataLoader(train_ds,batch_size=256,collate_fn=collator,num_workers=24,pin_memory=True)
+    train_dl = DataLoader(train_ds,batch_size=128,collate_fn=collator,num_workers=24,pin_memory=True)
     train_dl = DataPrefetcher(train_dl,local_rank)
     model = DeepGlycan(cfg, torch.tensor(mass_list,device=local_rank), detokenize_aa_dict).to(local_rank)
     new_state_dict = {}

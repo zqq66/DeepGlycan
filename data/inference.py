@@ -199,8 +199,9 @@ class OptimisedInference(object):
                         # print('mass-diff', current_status_new.precursor_mass-current_status_new.current_mass)
                         mass_diff = abs(current_status_new.glycan_mass-current_status_new.current_mass)
                         # print('tgt',current_status_new.psm_idx, current_status_new.inference_seq, current_status_new.score, current_status_new.current_mass, current_status_new.glycan_mass)
+                        # print('mass_diff', mass_diff)
                         if current_status_new.idx in pep_finish_pool:
-                            if mass_diff< 0.02 or pep_finish_pool[current_status_new.idx].score<current_status_new.score:
+                            if mass_diff<pep_finish_pool[current_status_new.idx].mass_diff:# or pep_finish_pool[current_status_new.idx].score<current_status_new.score:
                                 # pep_finish_pool[current_status_new.idx].mass_diff
                                 # print(current_status_new.idx, current_status_new.score_list, mass_diff, current_status_new.inference_seq[1:])
                                 pep_finish_pool[current_status_new.idx] = Pep_Finish_Status(psm_idx=deepcopy(current_status_new.psm_idx),
@@ -215,7 +216,6 @@ class OptimisedInference(object):
                                                                                         mass_diff=mass_diff,
                                                                                         isotope_shift=current_status_new.isotope_shift)
                         else:
-
                             pep_finish_pool[current_status_new.idx] = Pep_Finish_Status(psm_idx=deepcopy(current_status_new.psm_idx),
                                                                                         inference_seq=deepcopy(current_status_new.inference_seq[1:]),
                                                                                         #label_seq=deepcopy(current_status_new.label_seq),

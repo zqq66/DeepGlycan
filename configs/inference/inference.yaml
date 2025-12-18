@@ -1,5 +1,5 @@
 beam_size: 9
-mass_cand: 0,1,2,3,4
+mass_cand: 0,1,2,4
 fasta_file: /home/q359zhan/olinked/data/ethcd/heart/UP000000589_10090.fasta
 decoy_fasta: /home/q359zhan/olinked/data/ethcd/heart
 enzyme: KR

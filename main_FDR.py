@@ -127,8 +127,11 @@ def read_mgf(path: str, glob_pattern: str = "*.mgf") -> Tuple[Dict[str, List[int
             charge = p.get("charge")[0]
             precursor = (prec_mz - PROTON_MASS) * abs(charge)
             title = p.get("title")
+            # print(title)
+            raw_name = title.split('.')[0]
             m = re.search(r"\bscan=(\d+)\b", title, flags=re.IGNORECASE)
-            scan2idx[int(m.group(1)) if m else None] = current_idx
+            scan2idx[raw_name +'.'+ str(int(m.group(1))) if m else None] = current_idx
+            # print(raw_name +'.'+ str(int(m.group(1))) if m else None)
             queries["indices_ms2"].append(queries["indices_ms2"][-1] + spec["m/z array"].size)
             queries["mass_list_ms2"].append(spec["m/z array"])
             queries["int_list_ms2"].append(spec["intensity array"])
@@ -150,7 +153,7 @@ def compute_glycan_scores(
     glycan_scores: List[float] = []
     for _, row in df.iterrows():
         spec_str = str(row["Spec"])
-        spec_num = int(spec_str.replace("decoy", ""))
+        spec_num = spec_str.replace("decoy", "")
         query_idx = scan2idx[spec_num]
 
         pep_mass = row["Pep mass"]
@@ -177,7 +180,6 @@ def compute_glycan_scores(
                         1 - (np.abs(theo_mass[idx] - observe_mass[j]) / 0.05) ** 4
                     )
         glycan_score *= matched / len(theo_mass)
-        print("glycan_score", glycan_score)
         glycan_scores.append(glycan_score)
     return glycan_scores
 
@@ -227,11 +229,12 @@ def resolve_fdr_cfg(cfg: Optional[DictConfig]) -> Dict[str, object]:
 def main(cfg: DictConfig) -> None:
     fdr_cfg = resolve_fdr_cfg(cfg)
 
-    input_csv = Path(to_absolute_path(cfg.in_dir/cfg.out_put_file))
-    mgf_path = Path(to_absolute_path(cfg.in_dir))
-    output_path = Path(to_absolute_path(cfg.fdr.output))
+    input_csv = Path(to_absolute_path(Path(cfg.out_dir)/cfg.out_put_file))
+    mgf_path = Path(to_absolute_path(cfg.out_dir))
+    output_path = Path(to_absolute_path(Path(cfg.out_dir)/cfg.fdr.output))
 
     df = pd.read_csv(input_csv)
+    df = df[df['mass difference'] < 0.02]
     print(len(df))
     df = df.dropna()
 
@@ -241,7 +244,6 @@ def main(cfg: DictConfig) -> None:
     _, passed_df, cutoff = apply_fdr(df, float(fdr_cfg["fdr_threshold"]))
     print(len(passed_df))
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     passed_df.to_csv(output_path, index=False)
     print(f"Saved FDR-filtered results to {output_path}")
     if cutoff is None:

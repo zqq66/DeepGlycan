@@ -84,7 +84,7 @@ echo "MGF dir   : ${MGF_DIR}"
 echo "Work dir  : ${WORK_DIR}"
 
 echo "Step 1/5: mgf_preprocess.py"
-python mgf_preprocess.py "${OVERRIDES[@]}"
+# python mgf_preprocess.py "${OVERRIDES[@]}"
 
 echo "Step 2/5: Hyper-Spec clustering"
 # (
@@ -93,10 +93,10 @@ echo "Step 2/5: Hyper-Spec clustering"
 # )
 
 echo "Step 3/5: pep_search.py"
-python pep_search.py "${OVERRIDES[@]}"
+# python pep_search.py "${OVERRIDES[@]}"
 
 echo "Step 4/5: main_inference_cluster.py"
-python main_inference_cluster.py "${OVERRIDES[@]}"
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python main_inference_cluster.py "${OVERRIDES[@]}"
 
 echo "Step 5/5: main_FDR.py"
 python main_FDR.py "${OVERRIDES[@]}"

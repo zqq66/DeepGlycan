@@ -1,0 +1,24 @@
+# Pinned runtime requirements for DeepGlycanInference (excluding `helper/`).
+# Generated from the repo's actual imports + the versions from the author's environment.
+#
+# PyTorch CUDA wheels:
+# - If you want the same CUDA build as the author's env (cu118), keep the extra index below.
+# - If you want CPU-only, remove the `--extra-index-url` line and change torch/torchvision versions accordingly.
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+hydra-core==1.3.2
+omegaconf==2.3.0
+PyYAML==6.0.3
+
+numpy==2.0.1
+pandas==2.2.2
+pyarrow==21.0.0
+
+tqdm==4.67.1
+more-itertools==10.8.0
+
+pyteomics==4.7.5
+alphapept==0.5.3
+
+torch==2.7.1+cu118
+torchvision==0.22.1+cu118

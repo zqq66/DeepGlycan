@@ -203,7 +203,7 @@ class IonIndexedOpenSearch:
     def find_top_k_peptides(
         self,
         spectrum: Sequence[Tuple[float, float]],
-        precursor_mass: float | None,
+        precursor_mass = None,
         top_k: int = 5,
         fragment_tolerance: float = 0.02,
     ) -> List[PeptideMatch]:
@@ -289,7 +289,7 @@ class IonIndexedOpenSearch:
         if not candidate_ids:
             # print('scoring_table',scoring_table)
             # Fall back to any peptide that collected at least one indexed match.
-            candidate_ids = {idx for idx, score in enumerate(scoring_table) if score > 3}
+            candidate_ids = {idx for idx, score in enumerate(scoring_table) if score > 0}
 
         if not candidate_ids:
             return []
@@ -329,7 +329,7 @@ class IonIndexedOpenSearch:
                 )
             )
 
-        # matches = [match for match in matches if match.normalized_matched_ions >= 0.5]
+        matches = [match for match in matches if match.normalized_matched_ions >= 0.5]
         matches.sort(reverse=True)
         return matches[:top_k]
 

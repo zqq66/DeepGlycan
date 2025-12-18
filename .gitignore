@@ -10,3 +10,6 @@ __pycache__/
 
 # IDE settings
 .vscode/
+heart_peptide_search-test.csv
+heart-y4-inference-fdr.csv
+old_pep_search.py
