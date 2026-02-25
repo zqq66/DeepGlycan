@@ -84,16 +84,16 @@ echo "MGF dir   : ${MGF_DIR}"
 echo "Work dir  : ${WORK_DIR}"
 
 echo "Step 1/5: mgf_preprocess.py"
-# python mgf_preprocess.py "${OVERRIDES[@]}"
+python mgf_preprocess.py "${OVERRIDES[@]}"
 
 echo "Step 2/5: Hyper-Spec clustering"
-# (
-#   cd Hyper-Spec
-#   python src/main.py "$MGF_DIR" "$MGF_DIR/cluster.csv" --cpu_core_preprocess=24 --cluster_alg dbscan --use_gpu_cluster --cluster_charges 2 3 4 5 --eps=0.2
-# )
+(
+cd Hyper-Spec
+python src/main.py "$MGF_DIR" "$MGF_DIR/cluster.csv" --cpu_core_preprocess=24 --cluster_alg dbscan --use_gpu_cluster --cluster_charges 2 3 4 5 --eps=0.2
+)
 
 echo "Step 3/5: pep_search.py"
-# python pep_search.py "${OVERRIDES[@]}"
+python pep_search.py "${OVERRIDES[@]}"
 
 echo "Step 4/5: main_inference_cluster.py"
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python main_inference_cluster.py "${OVERRIDES[@]}"
