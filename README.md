@@ -16,7 +16,7 @@ Notes:
 
 ## Environment
 
-Pinned Python dependencies (based on the repo's actual imports, excluding `helper/`) are in `requirements.txt`.
+Python dependencies are in `requirements.txt`.
 If you prefer conda, a minimal `environment.yml` is also provided.
 
 Hyper-Spec clustering
