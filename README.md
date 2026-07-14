@@ -1,4 +1,4 @@
-DOI: 10.5281/zenodo.21348403
+[DOI: 10.5281/zenodo.21348403](https://doi.org/10.5281/zenodo.21348403)
 
 ## Workflow Runner
 
