@@ -1,3 +1,5 @@
+DOI: 10.5281/zenodo.21348403
+
 ## Workflow Runner
 
 Use the helper script to execute the full pipeline (mgf preprocessing → Hyper-Spec clustering → peptide search → inference → FDR) with a single command:
